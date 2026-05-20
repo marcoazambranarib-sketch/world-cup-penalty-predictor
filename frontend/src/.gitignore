@@ -1,0 +1,10 @@
+# Python ignores
+__pycache__/
+*.pyc
+*.pkl
+*.pth
+
+# React ignores
+frontend/node_modules/
+frontend/build/
+.DS_Store

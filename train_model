@@ -1,0 +1,95 @@
+import pandas as pd
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from sklearn.preprocessing import LabelEncoder
+from sklearn.model_selection import train_test_split
+import joblib
+
+print("Loading master dataset...")
+df = pd.read_csv('master_shootouts_merged.csv')
+
+# 1. Preprocessing: Convert text into numbers
+print("Encoding categorical features...")
+encoders = {}
+categorical_cols = ['Shooter_Name', 'Team', 'Shooter_Foot', 'Keeper_Dive']
+
+# We must ensure all missing values are handled before encoding
+for col in categorical_cols:
+    df[col] = df[col].astype(str)
+    le = LabelEncoder()
+    df[col] = le.fit_transform(df[col])
+    encoders[col] = le  # Save the encoder to use later in the Flask API
+
+# Save the encoders so the web app knows how to translate names back to numbers
+joblib.dump(encoders, 'label_encoders.pkl')
+
+# 2. Define Features (X) and Target (y)
+X = df[['Shooter_Name', 'Team', 'Shooter_Foot', 'Keeper_Dive']].values
+y = df['Is_Goal'].values
+
+# Split into training and testing sets (80% train, 20% test)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Convert to PyTorch Tensors
+X_train_tensor = torch.FloatTensor(X_train)
+y_train_tensor = torch.FloatTensor(y_train).view(-1, 1)
+X_test_tensor = torch.FloatTensor(X_test)
+y_test_tensor = torch.FloatTensor(y_test).view(-1, 1)
+
+# 3. Define the PyTorch Neural Network
+class PenaltyPredictor(nn.Module):
+    def __init__(self, input_dim):
+        super(PenaltyPredictor, self).__init__()
+        # A simple feed-forward network (MLP)
+        self.layer1 = nn.Linear(input_dim, 16)
+        self.layer2 = nn.Linear(16, 8)
+        self.output_layer = nn.Linear(8, 1)
+        self.relu = nn.ReLU()
+        self.sigmoid = nn.Sigmoid() # Forces output to be a probability between 0 and 1
+
+    def forward(self, x):
+        x = self.relu(self.layer1(x))
+        x = self.relu(self.layer2(x))
+        x = self.sigmoid(self.output_layer(x))
+        return x
+
+print("Initializing Neural Network...")
+input_size = X_train.shape[1]
+model = PenaltyPredictor(input_dim=input_size)
+
+# 4. Define Loss Function and Optimizer
+criterion = nn.BCELoss() # Binary Cross Entropy (perfect for 1/0 Goal Prediction)
+optimizer = optim.Adam(model.parameters(), lr=0.01)
+
+# 5. Train the Model
+epochs = 200
+print(f"Training for {epochs} epochs...")
+
+for epoch in range(epochs):
+    model.train()
+    optimizer.zero_grad()
+    
+    # Forward pass
+    predictions = model(X_train_tensor)
+    loss = criterion(predictions, y_train_tensor)
+    
+    # Backward pass and optimize
+    loss.backward()
+    optimizer.step()
+    
+    if (epoch + 1) % 50 == 0:
+        print(f'Epoch [{epoch+1}/{epochs}], Loss: {loss.item():.4f}')
+
+# 6. Evaluate Accuracy
+model.eval()
+with torch.no_grad():
+    test_preds = model(X_test_tensor)
+    test_preds_class = test_preds.round() # Round to 0 or 1
+    accuracy = (test_preds_class.eq(y_test_tensor).sum() / float(y_test_tensor.shape[0])).item()
+    print(f"\nModel Accuracy on Test Data: {accuracy * 100:.2f}%")
+
+# 7. Save the trained model weights for the Flask API
+torch.save(model.state_dict(), 'penalty_model.pth')
+print("Model saved to 'penalty_model.pth'. Ready for Phase 4 (Flask Server)!")

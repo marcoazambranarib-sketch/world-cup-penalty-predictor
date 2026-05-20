@@ -1,0 +1,82 @@
+import pandas as pd
+import numpy as np
+
+def merge_datasets():
+    print("Loading datasets...")
+    
+    # 1. Load the uploaded files
+    try:
+        df_shootout = pd.read_csv('shootout.csv')
+        df_wc = pd.read_csv('WorldCupShootouts.csv')
+        df_qatar = pd.read_csv('penalty_kicks.csv')
+    except FileNotFoundError as e:
+        print(f"File missing: {e}. Ensure all CSVs are in the folder.")
+        return
+
+    print("Processing Historical Data (shootout.csv & WorldCupShootouts.csv)...")
+    
+    # 2. Combine the two identical historical datasets and drop any duplicate rows
+    df_historical = pd.concat([df_shootout, df_wc], ignore_index=True).drop_duplicates()
+    
+    # Standardize the Keeper column explicitly to handle the R, C, L values
+    if 'Keeper' in df_historical.columns:
+        # Convert to string, uppercase, and strip any accidental white space
+        df_historical['Keeper'] = df_historical['Keeper'].astype(str).str.upper().str.strip()
+        
+        # Optional: Ensure only R, C, L are kept; replace weird data with 'Unknown'
+        valid_dives = ['R', 'C', 'L']
+        df_historical['Keeper'] = df_historical['Keeper'].apply(lambda x: x if x in valid_dives else 'Unknown')
+
+    # Map historical columns to our master standard
+    historical_mapped = pd.DataFrame()
+    historical_mapped['Match_ID'] = df_historical['Game_id'].astype(str)
+    historical_mapped['Team'] = df_historical['Team']
+    historical_mapped['Shooter_Foot'] = df_historical['Foot'].astype(str).str.upper().str.strip()
+    historical_mapped['Keeper_Dive'] = df_historical['Keeper'] # The R, C, L data
+    historical_mapped['Kick_Placement'] = df_historical['Zone']
+    historical_mapped['Is_Goal'] = df_historical['Goal']
+    historical_mapped['Kick_Number'] = df_historical['Penalty_Number']
+    # Note: These files lack shooter names!
+    historical_mapped['Shooter_Name'] = 'Unknown Shooter' 
+
+    print("Processing 2022 Qatar Data (penalty_kicks.csv)...")
+    
+    # 3. Process the Qatar dataset (handling its specific gaps)
+    qatar_mapped = pd.DataFrame()
+    qatar_mapped['Match_ID'] = df_qatar['match_id'].astype(str)
+    qatar_mapped['Team'] = df_qatar['team_code']
+    
+    # Combine first and last name for the shooter
+    df_qatar['given_name'] = df_qatar['given_name'].fillna('')
+    df_qatar['family_name'] = df_qatar['family_name'].fillna('')
+    qatar_mapped['Shooter_Name'] = (df_qatar['given_name'] + ' ' + df_qatar['family_name']).str.strip()
+    
+    qatar_mapped['Is_Goal'] = df_qatar['converted']
+    
+    # Handle the gaps: Qatar dataset doesn't have Keeper Dive, Foot, or Zone
+    qatar_mapped['Keeper_Dive'] = 'Unknown'
+    qatar_mapped['Shooter_Foot'] = 'Unknown'
+    qatar_mapped['Kick_Placement'] = -1  # Using -1 to indicate missing numerical zone
+    qatar_mapped['Kick_Number'] = np.nan # Can be calculated later if needed
+
+    print("Merging into final dataset...")
+    
+    # 4. Stack everything together
+    final_df = pd.concat([historical_mapped, qatar_mapped], ignore_index=True)
+    
+    # Standardize 'Is_Goal' to integer (1 for Goal, 0 for Miss/Save)
+    final_df['Is_Goal'] = final_df['Is_Goal'].replace({True: 1, False: 0}).fillna(0).astype(int)
+
+    # 5. Save the output
+    output_filename = 'master_shootouts_merged.csv'
+    final_df.to_csv(output_filename, index=False)
+    
+    print(f"\nSuccess! Merged dataset saved to '{output_filename}'")
+    print(f"Total kicks recorded: {len(final_df)}")
+    
+    # Display the breakdown of Keeper dives to verify the R, C, L capture
+    print("\nKeeper Dive Distribution:")
+    print(final_df['Keeper_Dive'].value_counts())
+
+if __name__ == "__main__":
+    merge_datasets()
