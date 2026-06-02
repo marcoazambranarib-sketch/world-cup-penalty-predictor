@@ -74,6 +74,7 @@ function App() {
           </div>
         )}
       </div>
+      <Dashboard />
     </div>
   );
 }
