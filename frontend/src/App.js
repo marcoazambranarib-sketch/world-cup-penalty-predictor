@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import './App.css';
+import Dashboard from './Dashboard';
 
 function App() {
   const [shooter, setShooter] = useState('Lionel Messi');
